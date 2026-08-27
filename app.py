@@ -8,7 +8,6 @@ from pathlib import Path
 
 import openpyxl
 import pandas as pd
-import plotly.express as px
 import streamlit as st
 
 
@@ -234,7 +233,11 @@ def build_ranking(stock: pd.DataFrame, movements: pd.DataFrame) -> pd.DataFrame:
     if movements.empty:
         movement_total = pd.Series(dtype="float64", name="movimentacao_vinculada")
     else:
-        movement_total = movements.groupby("codigo_produto")["valor_movimento"].sum().rename("movimentacao_vinculada")
+        movement_total = (
+            movements.groupby("codigo_produto")["valor_movimento_assinado"]
+            .sum()
+            .rename("movimentacao_vinculada")
+        )
 
     ranking = stock.merge(movement_total, on="codigo_produto", how="left")
     ranking["movimentacao_vinculada"] = ranking["movimentacao_vinculada"].fillna(0)
@@ -242,7 +245,8 @@ def build_ranking(stock: pd.DataFrame, movements: pd.DataFrame) -> pd.DataFrame:
     ranking["saldo_justificar"] = (ranking["valor_quebra"] - ranking["valor_identificado"]).clip(lower=0)
     ranking["cobertura"] = ranking["valor_identificado"].div(ranking["valor_quebra"].replace(0, pd.NA)).fillna(0)
     ranking["status"] = "Identificada"
-    ranking.loc[ranking["movimentacao_vinculada"].eq(0), "status"] = "Sem Movimentações"
+    ranking.loc[ranking["movimentacao_vinculada"].eq(0), "status"] = "Sem Ajustes"
+    ranking.loc[ranking["movimentacao_vinculada"].lt(0), "status"] = "Ajuste negativo"
     ranking.loc[
         ranking["movimentacao_vinculada"].gt(0) & ranking["movimentacao_vinculada"].lt(ranking["valor_quebra"]),
         "status",
@@ -254,10 +258,61 @@ def inject_css() -> None:
     st.markdown(
         """
         <style>
-        :root { --accent: #ff4b55; --panel: #191d24; --border: #2c323d; --muted: #9ba3af; }
-        .stApp { background: #0d1117; color: #f3f4f6; }
-        [data-testid="stSidebar"] { background: #232630; border-right: 1px solid #2d3340; }
+        :root {
+            color-scheme: dark;
+            --accent: #ff4b55;
+            --app-bg: #0d1117;
+            --sidebar-bg: #232630;
+            --panel: #191d24;
+            --panel-secondary: #14181e;
+            --input-bg: #11151b;
+            --text: #f3f4f6;
+            --text-strong: #f8fafc;
+            --muted: #aeb5c0;
+            --muted-soft: #8f98a5;
+            --border: #2c323d;
+            --button-border: #3a414d;
+            --shadow: rgba(0, 0, 0, .18);
+            --hover: rgba(255, 75, 85, .055);
+        }
+        @media (prefers-color-scheme: light) {
+            :root {
+                color-scheme: light;
+                --app-bg: #f6f7fb;
+                --sidebar-bg: #eef0f5;
+                --panel: #ffffff;
+                --panel-secondary: #f8f9fc;
+                --input-bg: #ffffff;
+                --text: #1b1f27;
+                --text-strong: #111827;
+                --muted: #5f6877;
+                --muted-soft: #70798a;
+                --border: #d8dde6;
+                --button-border: #c5cbd6;
+                --shadow: rgba(25, 35, 55, .08);
+                --hover: rgba(255, 75, 85, .07);
+            }
+        }
+        html, body, [data-testid="stAppViewContainer"], .stApp {
+            background: var(--app-bg) !important;
+            color: var(--text) !important;
+        }
+        [data-testid="stHeader"] {
+            background: color-mix(in srgb, var(--app-bg) 92%, transparent) !important;
+            color: var(--text) !important;
+        }
+        [data-testid="stToolbar"], [data-testid="stDecoration"] {
+            color: var(--text) !important;
+        }
+        [data-testid="stSidebar"] {
+            background: var(--sidebar-bg) !important;
+            color: var(--text) !important;
+            border-right: 1px solid var(--border);
+        }
         [data-testid="stSidebar"] > div { padding-top: 1.1rem; }
+        .stApp p, .stApp label, .stApp h1, .stApp h2, .stApp h3,
+        .stApp h4, .stApp h5, .stApp h6, [data-testid="stSidebar"] p,
+        [data-testid="stSidebar"] label { color: var(--text); }
         .block-container {
             max-width: none !important;
             padding: 1.35rem 2rem 3rem !important;
@@ -268,36 +323,52 @@ def inject_css() -> None:
             overflow: visible; line-height: 1.4; color: var(--accent);
             font-weight: 700; text-transform: uppercase; letter-spacing: .12em; font-size: .72rem;
         }
-        .hero-subtitle { color: #aeb5c0; margin-top: -.55rem; margin-bottom: 1.35rem; }
+        .hero-subtitle { color: var(--muted); margin-top: -.55rem; margin-bottom: 1.35rem; }
         .metric-card {
             min-width: 0; min-height: 132px; padding: 18px 18px 16px; overflow: hidden;
             border: 1px solid var(--border);
-            border-radius: 12px; background: linear-gradient(145deg, #1b1f26 0%, #171a20 100%);
-            box-shadow: 0 10px 26px rgba(0,0,0,.12);
+            border-radius: 12px; background: linear-gradient(145deg, var(--panel) 0%, var(--panel-secondary) 100%);
+            box-shadow: 0 10px 26px var(--shadow);
         }
-        .metric-label { color: #aab1bc; font-size: .78rem; font-weight: 650; min-height: 20px; }
+        .metric-label { color: var(--muted); font-size: .78rem; font-weight: 650; min-height: 20px; }
         .metric-value {
-            color: #f8fafc; font-size: clamp(.92rem, 1.28vw, 1.45rem); line-height: 1.15;
+            color: var(--text-strong); font-size: clamp(.92rem, 1.28vw, 1.45rem); line-height: 1.15;
             letter-spacing: -.035em; font-weight: 720; font-variant-numeric: tabular-nums;
             margin: 9px 0 6px; white-space: nowrap;
         }
-        .metric-detail { color: #7f8895; font-size: .72rem; }
-        [data-testid="stDataFrame"] { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+        .metric-detail { color: var(--muted-soft); font-size: .72rem; }
+        [data-testid="stDataFrame"] {
+            border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+            background: var(--panel);
+        }
         [data-testid="stExpander"] {
             border: 1px solid var(--border); border-radius: 10px;
-            background: linear-gradient(145deg, #171b22 0%, #14181e 100%);
+            background: linear-gradient(145deg, var(--panel) 0%, var(--panel-secondary) 100%);
             overflow: hidden;
         }
         [data-testid="stExpander"] summary { padding: .72rem .9rem; }
-        [data-testid="stExpander"] summary:hover { background: rgba(255, 75, 85, .045); }
+        [data-testid="stExpander"] summary:hover { background: var(--hover); }
         [data-baseweb="tab-list"] { gap: 1.1rem; border-bottom: 1px solid var(--border); }
         [data-baseweb="tab"] { padding-left: 0; padding-right: 0; }
-        [aria-selected="true"] { color: var(--accent) !important; }
-        .stButton > button, .stDownloadButton > button { border-color: #3a414d; border-radius: 8px; }
+        [data-baseweb="tab"][aria-selected="true"] { color: var(--accent) !important; }
+        [data-baseweb="input"] > div, [data-baseweb="select"] > div,
+        [data-testid="stFileUploaderDropzone"], textarea, input {
+            background: var(--input-bg) !important;
+            color: var(--text) !important;
+            border-color: var(--border) !important;
+        }
+        [data-baseweb="popover"], [role="listbox"] {
+            background: var(--panel) !important;
+            color: var(--text) !important;
+        }
+        .stButton > button, .stDownloadButton > button {
+            color: var(--text); background: var(--panel); border-color: var(--button-border); border-radius: 8px;
+        }
         .stButton > button:hover, .stDownloadButton > button:hover { border-color: var(--accent); color: var(--accent); }
-        [data-testid="stFileUploaderDropzone"] { background: #11151b; border-color: #343b47; }
+        [data-testid="stFileUploaderDropzone"] { background: var(--input-bg); border-color: var(--border); }
         .detail-title { border-left: 3px solid var(--accent); padding-left: 12px; margin: 1.2rem 0 .8rem; }
-        .method-note { color: #929aa6; font-size: .78rem; line-height: 1.45; }
+        .detail-code { color: var(--muted-soft); }
+        .method-note { color: var(--muted-soft); font-size: .78rem; line-height: 1.45; }
         hr { border-color: var(--border) !important; }
         </style>
         """,
@@ -312,8 +383,8 @@ def detail_table(movements: pd.DataFrame, category: str) -> pd.DataFrame:
     grouped = (
         category_data.groupby("subcategoria", as_index=False)
         .agg(
-            quantidade=("quantidade_movimento", lambda values: values.sum(min_count=1)),
-            valor=("valor_movimento", "sum"),
+            quantidade=("quantidade_movimento_assinada", lambda values: values.sum(min_count=1)),
+            valor=("valor_movimento_assinado", "sum"),
             registros=("codigo_produto", "size"),
         )
         .sort_values("valor", ascending=False)
@@ -460,10 +531,129 @@ def render_store_ranking(
             )
 
 
+def render_informative_movements(
+    stock: pd.DataFrame,
+    movements: pd.DataFrame,
+    search: str,
+    top_n: int,
+) -> None:
+    informative = movements[~movements["categoria"].eq("Ajustes Lojas")].copy()
+    st.markdown("#### Movimentações informativas")
+    st.caption(
+        "Transferências, devoluções e inventário. "
+    )
+
+    cards: list[tuple[str, float, str]] = []
+    for category in ["Transferências", "Devoluções"]:
+        category_data = informative[informative["categoria"].eq(category)]
+        cards.append(
+            (
+                f"Total {category}",
+                float(category_data["valor_movimento_assinado"].sum()),
+                f"{category_data['codigo_produto'].nunique()} produtos do CD",
+            )
+        )
+
+    inventory = informative[informative["categoria"].eq("Inventário")]
+    for cgo, cgo_data in inventory.groupby("subcategoria", sort=True):
+        cards.append(
+            (
+                str(cgo).title(),
+                float(cgo_data["valor_movimento_assinado"].sum()),
+                f"{cgo_data['codigo_produto'].nunique()} produtos do CD",
+            )
+        )
+
+    if cards:
+        card_columns = st.columns(len(cards))
+        for column, (label, value, detail) in zip(card_columns, cards):
+            with column:
+                metric_card(label, brl(value), detail)
+
+    comparison = stock[["codigo_produto", "produto", "valor_quebra"]].copy()
+    movement_columns: list[str] = []
+
+    for category in ["Transferências", "Devoluções"]:
+        column_name = category
+        totals = (
+            informative[informative["categoria"].eq(category)]
+            .groupby("codigo_produto")["valor_movimento_assinado"]
+            .sum()
+            .rename(column_name)
+        )
+        comparison = comparison.merge(totals, on="codigo_produto", how="left")
+        movement_columns.append(column_name)
+
+    if not inventory.empty:
+        inventory_pivot = inventory.pivot_table(
+            index="codigo_produto",
+            columns="subcategoria",
+            values="valor_movimento_assinado",
+            aggfunc="sum",
+            fill_value=0,
+        )
+        renamed_inventory = {}
+        for column in inventory_pivot.columns:
+            normalized = normalize_label(column)
+            if "entrada" in normalized:
+                renamed_inventory[column] = "Inventário - Entrada"
+            elif "saida" in normalized:
+                renamed_inventory[column] = "Inventário - Saída"
+            else:
+                renamed_inventory[column] = f"Inventário - {column}"
+        inventory_pivot = inventory_pivot.rename(columns=renamed_inventory).reset_index()
+        comparison = comparison.merge(inventory_pivot, on="codigo_produto", how="left")
+        movement_columns.extend(renamed_inventory.values())
+
+    comparison[movement_columns] = comparison[movement_columns].fillna(0)
+    comparison["Total informativo"] = comparison[movement_columns].sum(axis=1)
+
+    if search.strip():
+        token = normalize_label(search)
+        comparison = comparison[
+            comparison.apply(
+                lambda row: token in normalize_label(row["produto"])
+                or token in normalize_label(row["codigo_produto"]),
+                axis=1,
+            )
+        ]
+
+    comparison["_ordem"] = comparison["Total informativo"].abs()
+    comparison = comparison.sort_values("_ordem", ascending=False).drop(columns="_ordem").head(top_n)
+    comparison.insert(0, "ranking", range(1, len(comparison) + 1))
+    comparison = comparison.rename(
+        columns={
+            "ranking": "#",
+            "codigo_produto": "Código",
+            "produto": "Produto",
+            "valor_quebra": "Valor líquido Estoque CD",
+        }
+    )
+
+    st.markdown("#### Movimentações por produto")
+    column_config = {
+        "#": st.column_config.NumberColumn(width="small", format="%d"),
+        "Código": st.column_config.TextColumn(width="small"),
+        "Produto": st.column_config.TextColumn(width="large"),
+        "Valor líquido Estoque CD": st.column_config.NumberColumn(format="R$ %,.2f"),
+        "Total informativo": st.column_config.NumberColumn(format="R$ %,.2f"),
+    }
+    for column in movement_columns:
+        column_config[column] = st.column_config.NumberColumn(format="R$ %,.2f")
+
+    st.dataframe(
+        comparison,
+        hide_index=True,
+        width="stretch",
+        height=min(720, 39 + 35 * max(len(comparison), 1)),
+        column_config=column_config,
+    )
+
+
 def render_product_detail(selected: pd.Series, product_movements: pd.DataFrame) -> None:
     st.markdown(
         f'<div class="detail-title"><h3 style="margin:0">{html.escape(str(selected["produto"]))}</h3>'
-        f'<span style="color:#8f98a5">Código {html.escape(str(selected["codigo_produto"]))}</span></div>',
+        f'<span class="detail-code">Código {html.escape(str(selected["codigo_produto"]))}</span></div>',
         unsafe_allow_html=True,
     )
 
@@ -471,21 +661,21 @@ def render_product_detail(selected: pd.Series, product_movements: pd.DataFrame) 
     with columns[0]:
         metric_card("Quantidade no CD", integer_br(selected["quantidade_estoque"]), "unidades em estoque")
     with columns[1]:
-        metric_card("Valor da quebra", brl(selected["valor_quebra"]), "Valor atual da base")
+        metric_card("Valor líquido Estoque CD", brl(selected["valor_quebra"]), "Valor atual da base")
     with columns[2]:
-        metric_card("Quebra identificada", brl(selected["valor_identificado"]), "soma integral de todas as movimentações")
+        metric_card("Valor líquido Ajustes Lojas", brl(selected["valor_identificado"]), "única base de identificação")
     with columns[3]:
         metric_card("Cobertura", percentage(selected["cobertura"]), selected["status"])
 
     if product_movements.empty:
-        st.warning("Nenhuma movimentação das categorias selecionadas foi encontrada para este produto.")
+        st.warning("Nenhuma das movimentações selecionadas foi encontrada para este produto.")
         return
 
     category_summary = (
         product_movements.groupby("categoria", as_index=False)
         .agg(
-            quantidade=("quantidade_movimento", lambda values: values.sum(min_count=1)),
-            valor=("valor_movimento", "sum"),
+            quantidade=("quantidade_movimento_assinada", lambda values: values.sum(min_count=1)),
+            valor=("valor_movimento_assinado", "sum"),
             registros=("codigo_produto", "size"),
         )
         .set_index("categoria")
@@ -498,23 +688,29 @@ def render_product_detail(selected: pd.Series, product_movements: pd.DataFrame) 
     )
     category_summary["Valor vinculado"] = category_summary["valor"].map(brl)
     category_summary["% da quebra"] = category_summary["valor"].div(selected["valor_quebra"]).map(percentage)
+    category_summary["Participa da identificação"] = category_summary["categoria"].map(
+        lambda category: "Sim" if category == "Ajustes Lojas" else "Não"
+    )
     display_category = category_summary.rename(columns={"categoria": "Categoria", "registros": "Registros"})[
-        ["Categoria", "Quantidade", "Valor vinculado", "% da quebra", "Registros"]
+        ["Categoria", "Quantidade", "Valor vinculado", "% da quebra", "Participa da identificação", "Registros"]
     ]
-    st.markdown("#### Categorias que justificam a quebra")
+    st.markdown("#### Movimentações do produto")
+    st.caption("Somente Ajustes Lojas participa do cálculo de identificação; as demais movimentações são informativas.")
     st.dataframe(display_category, hide_index=True, width="stretch")
 
-    available_categories = [category for category in CATEGORIES if category in set(product_movements["categoria"])]
+    available_categories = [
+        category for category in CATEGORIES if category in set(product_movements["categoria"])
+    ]
     tabs = st.tabs(available_categories)
     for tab, category in zip(tabs, available_categories):
         with tab:
             table = detail_table(product_movements, category)
             if category == "Ajustes Lojas":
-                st.caption("Detalhamento por loja, do maior para o menor valor vinculado.")
+                st.caption("Detalhamento por loja. Esta movimentação participa da identificação da quebra.")
             elif category == "Inventário":
-                st.caption("Detalhamento pelos CGOs.")
+                st.caption("Detalhamento informativo por CGO. Não participa da identificação da quebra.")
             else:
-                st.caption("Detalhamento por CGO/origem.")
+                st.caption("Detalhamento informativo da movimentação. Não participa da identificação da quebra.")
             st.dataframe(table, hide_index=True, width="stretch", height=min(420, 72 + 36 * len(table)))
 
 
@@ -540,14 +736,17 @@ def main() -> None:
         st.divider()
         st.markdown("### Filtros")
         search = st.text_input("Produto ou código", placeholder="Ex.: 2203 ou Itaipava")
-        categories = st.multiselect("Categorias consideradas", CATEGORIES, default=CATEGORIES)
-        statuses = st.multiselect(
-            "Status da justificativa",
-            ["Identificada", "Parcial", "Sem Movimentações"],
-            default=["Identificada", "Parcial", "Sem Movimentações"],
+        detail_categories = st.multiselect(
+            "Movimentações no detalhamento",
+            CATEGORIES,
+            default=CATEGORIES,
+            help=(
+                "Controla somente as tabelas do detalhamento. "
+                "A identificação continua usando apenas Ajustes Lojas."
+            ),
         )
         order_label = st.radio("Ordenar ranking por", ["Maior quantidade", "Maior valor"], horizontal=False)
-        top_n = st.slider("Produtos exibidos", 10, 100, 30, step=10)
+        top_n = st.slider("Produtos exibidos", 10, 130, 30, step=10)
 
     try:
         with st.spinner("Lendo e conciliando as abas..."):
@@ -556,17 +755,16 @@ def main() -> None:
         st.error(f"Não foi possível processar a planilha: {error}")
         st.stop()
 
-    movements = movements_all[movements_all["categoria"].isin(categories)].copy()
-    ranking_all = build_ranking(stock, movements)
+    adjustments = movements_all[movements_all["categoria"].eq("Ajustes Lojas")].copy()
+    ranking_all = build_ranking(stock, adjustments)
 
     total_break = ranking_all["valor_quebra"].sum()
-    adjustments_kpi = movements_all[movements_all["categoria"].eq("Ajustes Lojas")]
-    total_identified = adjustments_kpi["valor_movimento_assinado"].sum()
-    total_gap = max(total_break - total_identified, 0)
+    total_identified = adjustments["valor_movimento_assinado"].sum()
+    total_gap = ranking_all["saldo_justificar"].sum()
     coverage = total_identified / total_break if total_break else 0
 
     st.markdown('<div class="eyebrow">Controle de estoque • CD 989</div>', unsafe_allow_html=True)
-    st.title("Análise de Quebra - Estoque CD")
+    st.title("Análise de Quebras - Estoque CD")
     st.markdown(
         '<div class="hero-subtitle">O Dashboard traz a análise dos produtos com maior quebra no "Estoque CD".</div>',
         unsafe_allow_html=True,
@@ -578,7 +776,7 @@ def main() -> None:
     with kpi_columns[1]:
         metric_card("Total em Ajustes Lojas", brl(total_identified), "valor líquido encontrado nos ajustes")
     with kpi_columns[2]:
-        metric_card("Saldo após Ajustes", brl(total_gap), "quebra CD menos Ajustes Lojas")
+        metric_card("Saldo após Ajustes", brl(total_gap), "soma dos saldos por produto")
     with kpi_columns[3]:
         metric_card("Cobertura Ajustes Lojas", percentage(coverage), "Ajustes Lojas ÷ quebra CD")
     with kpi_columns[4]:
@@ -595,65 +793,19 @@ def main() -> None:
             lambda row: token in normalize_label(row["produto"]) or token in normalize_label(row["codigo_produto"]), axis=1
         )
         filtered = filtered[mask]
-    filtered = filtered[filtered["status"].isin(statuses)]
     order_column = "quantidade_estoque" if order_label == "Maior quantidade" else "valor_quebra"
     filtered = filtered.sort_values([order_column, "valor_quebra"], ascending=False).head(top_n).reset_index(drop=True)
     filtered.insert(0, "ranking", range(1, len(filtered) + 1))
 
     with overview_tab:
-        chart_data = filtered.head(15).sort_values(order_column, ascending=True).copy()
-        if chart_data.empty:
-            st.info("Nenhum produto corresponde aos filtros atuais.")
-        else:
-            chart_data["rotulo"] = chart_data["codigo_produto"].astype(str) + " · " + chart_data["produto"].str.slice(0, 38)
-            chart_data["rotulo_valor"] = chart_data.apply(
-                lambda row: f'{integer_br(row["quantidade_estoque"])} un.  •  {brl(row["valor_quebra"])}', axis=1
-            )
-            y_value = "quantidade_estoque" if order_label == "Maior quantidade" else "valor_quebra"
-            chart = px.bar(
-                chart_data,
-                x=y_value,
-                y="rotulo",
-                text="rotulo_valor",
-                orientation="h",
-                color="cobertura",
-                color_continuous_scale=["#ff4b55", "#f7b267", "#34d399"],
-                range_color=[0, max(1.0, min(3.0, float(chart_data["cobertura"].max())))],
-                labels={y_value: order_label.replace("Maior ", "").capitalize(), "rotulo": "Produto", "cobertura": "Cobertura"},
-            )
-            maximum_value = float(chart_data[y_value].max())
-            chart.update_traces(
-                textposition="outside",
-                textfont=dict(color="#e5e7eb", size=11),
-                cliponaxis=False,
-            )
-            chart.update_layout(
-                height=560,
-                margin=dict(l=0, r=28, t=20, b=10),
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)",
-                font_color="#d8dde5",
-                coloraxis_colorbar_tickformat=".0%",
-                xaxis_gridcolor="#272d36",
-                xaxis_range=[0, maximum_value * 1.42 if maximum_value else 1],
-                yaxis_title=None,
-                uniformtext_minsize=9,
-                uniformtext_mode="show",
-            )
-            st.plotly_chart(chart, width="stretch", config={"displayModeBar": False})
-
-        status_summary = (
-            ranking_all.groupby("status", as_index=False)
-            .agg(Produtos=("codigo_produto", "size"), **{"Valor da quebra": ("valor_quebra", "sum")})
-            .sort_values("Valor da quebra", ascending=False)
-        )
-        status_summary["Valor da quebra"] = status_summary["Valor da quebra"].map(brl)
-        st.markdown("#### Situação da justificativa")
-        st.dataframe(status_summary.rename(columns={"status": "Status"}), hide_index=True, width="stretch")
+        render_informative_movements(stock, movements_all, search, top_n)
 
     with ranking_tab:
-        st.markdown("#### Ranking de produtos do Estoque CD")
-        st.caption("Clique em uma linha para abrir as categorias e seus detalhamentos abaixo.")
+        st.markdown("#### Comparativo Estoque CD × Ajustes Lojas")
+        st.caption(
+            "O valor identificado considera exclusivamente o valor líquido de Ajustes Lojas. "
+            "Clique em uma linha para abrir o detalhamento por loja."
+        )
         display = filtered[
             [
                 "ranking",
@@ -662,9 +814,7 @@ def main() -> None:
                 "quantidade_estoque",
                 "valor_quebra",
                 "valor_identificado",
-                "saldo_justificar",
                 "cobertura",
-                "status",
             ]
         ].rename(
             columns={
@@ -672,11 +822,9 @@ def main() -> None:
                 "codigo_produto": "Código",
                 "produto": "Produto",
                 "quantidade_estoque": "Quantidade",
-                "valor_quebra": "Valor da quebra",
-                "valor_identificado": "Identificado",
-                "saldo_justificar": "A justificar",
-                "cobertura": "Cobertura",
-                "status": "Status",
+                "valor_quebra": "Valor líquido Estoque CD",
+                "valor_identificado": "Valor líquido Ajustes Lojas",
+                "cobertura": "Ajustes / Estoque",
             }
         )
 
@@ -693,18 +841,17 @@ def main() -> None:
                 "Código": st.column_config.TextColumn(width="small"),
                 "Produto": st.column_config.TextColumn(width="large"),
                 "Quantidade": st.column_config.NumberColumn(format="%,.0f"),
-                "Valor da quebra": st.column_config.NumberColumn(format="R$ %,.2f"),
-                "Identificado": st.column_config.NumberColumn(format="R$ %,.2f"),
-                "A justificar": st.column_config.NumberColumn(format="R$ %,.2f"),
-                "Cobertura": st.column_config.NumberColumn(format="percent"),
+                "Valor líquido Estoque CD": st.column_config.NumberColumn(format="R$ %,.2f"),
+                "Valor líquido Ajustes Lojas": st.column_config.NumberColumn(format="R$ %,.2f"),
+                "Ajustes / Estoque": st.column_config.NumberColumn(format="percent"),
             },
         )
 
-        csv_data = filtered.drop(columns=["ranking"]).to_csv(index=False, sep=";", decimal=",", encoding="utf-8-sig")
+        csv_data = display.to_csv(index=False, sep=";", decimal=",", encoding="utf-8-sig")
         st.download_button(
             "Baixar ranking filtrado (CSV)",
             data=csv_data.encode("utf-8-sig"),
-            file_name="ranking_quebra_estoque_cd.csv",
+            file_name="comparativo_estoque_cd_ajustes_lojas.csv",
             mime="text/csv",
             width="stretch",
         )
@@ -723,11 +870,14 @@ def main() -> None:
             selected = None
 
         if selected is not None:
-            product_movements = movements[movements["codigo_produto"].eq(selected["codigo_produto"])]
+            detail_movements = movements_all[movements_all["categoria"].isin(detail_categories)]
+            product_movements = detail_movements[
+                detail_movements["codigo_produto"].eq(selected["codigo_produto"])
+            ]
             render_product_detail(selected, product_movements)
 
         st.markdown(
-            '<p class="method-note"><strong>Regra de conciliação:</strong> a quebra identificada é a soma absoluta integral dos valores encontrados em Ajustes Lojas, Transferências, Devoluções e Inventário.</p>',
+            '<p class="method-note"><strong>Regra de identificação:</strong> somente o valor líquido assinado de Ajustes Lojas participa do comparativo, da cobertura e do saldo. Transferências, Devoluções e Inventário são informativos e podem ser ativados ou desativados no filtro de detalhamento.</p>',
             unsafe_allow_html=True,
         )
 
@@ -742,9 +892,9 @@ def main() -> None:
         no_evidence = ranking_all[ranking_all["movimentacao_vinculada"].eq(0)][["codigo_produto", "produto", "valor_quebra"]]
         no_evidence = no_evidence.sort_values("valor_quebra", ascending=False)
         no_evidence["valor_quebra"] = no_evidence["valor_quebra"].map(brl)
-        st.markdown("#### Produtos do CD sem movimentação vinculada")
+        st.markdown("#### Produtos do CD sem Ajustes Lojas")
         if no_evidence.empty:
-            st.success("Todos os produtos do Estoque CD possuem alguma movimentação vinculada nas categorias selecionadas.")
+            st.success("Todos os produtos do Estoque CD possuem valores vinculados em Ajustes Lojas.")
         else:
             st.dataframe(
                 no_evidence.rename(columns={"codigo_produto": "Código", "produto": "Produto", "valor_quebra": "Valor da quebra"}),
