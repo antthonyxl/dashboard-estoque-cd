@@ -164,8 +164,10 @@ def prepare_data(file_bytes: bytes) -> tuple[pd.DataFrame, pd.DataFrame, pd.Data
         all_codes = set(raw["codigo_produto"].dropna())
         linked = raw[raw["codigo_produto"].isin(cd_codes)].copy()
         linked["categoria"] = category
-        linked["valor_movimento"] = numeric(linked.get("valor_liquido"), linked.index).fillna(0).abs()
-        linked["quantidade_movimento"] = numeric(linked.get("quantidade_mov"), linked.index).abs()
+        linked["valor_movimento_assinado"] = numeric(linked.get("valor_liquido"), linked.index).fillna(0)
+        linked["valor_movimento"] = linked["valor_movimento_assinado"].abs()
+        linked["quantidade_movimento_assinada"] = numeric(linked.get("quantidade_mov"), linked.index)
+        linked["quantidade_movimento"] = linked["quantidade_movimento_assinada"].abs()
 
         if subcategory_column in linked.columns:
             linked["subcategoria"] = linked[subcategory_column].fillna("Não informado").astype(str).str.strip()
@@ -181,7 +183,9 @@ def prepare_data(file_bytes: bytes) -> tuple[pd.DataFrame, pd.DataFrame, pd.Data
                     "categoria",
                     "subcategoria",
                     "quantidade_movimento",
+                    "quantidade_movimento_assinada",
                     "valor_movimento",
+                    "valor_movimento_assinado",
                 ]
             ]
         )
@@ -279,6 +283,13 @@ def inject_css() -> None:
         }
         .metric-detail { color: #7f8895; font-size: .72rem; }
         [data-testid="stDataFrame"] { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+        [data-testid="stExpander"] {
+            border: 1px solid var(--border); border-radius: 10px;
+            background: linear-gradient(145deg, #171b22 0%, #14181e 100%);
+            overflow: hidden;
+        }
+        [data-testid="stExpander"] summary { padding: .72rem .9rem; }
+        [data-testid="stExpander"] summary:hover { background: rgba(255, 75, 85, .045); }
         [data-baseweb="tab-list"] { gap: 1.1rem; border-bottom: 1px solid var(--border); }
         [data-baseweb="tab"] { padding-left: 0; padding-right: 0; }
         [aria-selected="true"] { color: var(--accent) !important; }
@@ -312,6 +323,141 @@ def detail_table(movements: pd.DataFrame, category: str) -> pd.DataFrame:
     return grouped.rename(columns={"subcategoria": "Detalhamento", "registros": "Registros"})[
         ["Detalhamento", "Quantidade", "Valor vinculado", "Registros"]
     ]
+
+
+def render_store_ranking(
+    stock: pd.DataFrame,
+    movements: pd.DataFrame,
+    search: str,
+    top_n: int,
+) -> None:
+    adjustments = movements[movements["categoria"].eq("Ajustes Lojas")].copy()
+    if adjustments.empty:
+        st.warning("Nenhum registro foi encontrado na aba Ajustes Lojas para os produtos do Estoque CD.")
+        return
+
+    totals = (
+        adjustments.groupby("codigo_produto", as_index=False)
+        .agg(
+            valor_ajustes=("valor_movimento_assinado", "sum"),
+            quantidade_ajustada=("quantidade_movimento_assinada", lambda values: values.sum(min_count=1)),
+            lojas=("subcategoria", "nunique"),
+            registros=("codigo_produto", "size"),
+        )
+    )
+    product_ranking = stock.merge(totals, on="codigo_produto", how="left")
+    product_ranking[["valor_ajustes", "lojas", "registros"]] = product_ranking[
+        ["valor_ajustes", "lojas", "registros"]
+    ].fillna(0)
+
+    if search.strip():
+        token = normalize_label(search)
+        mask = product_ranking.apply(
+            lambda row: token in normalize_label(row["produto"])
+            or token in normalize_label(row["codigo_produto"]),
+            axis=1,
+        )
+        product_ranking = product_ranking[mask]
+
+    controls = st.columns([1.35, 1])
+    with controls[0]:
+        store_order = st.selectbox(
+            "Ordenar produtos por",
+            ["Maior valor no Estoque CD", "Maior valor em Ajustes Lojas", "Maior quantidade em estoque"],
+            key="store_ranking_order",
+        )
+    with controls[1]:
+        show_without_adjustments = st.toggle(
+            "Exibir produtos sem ajustes",
+            value=False,
+            key="show_without_store_adjustments",
+        )
+
+    if not show_without_adjustments:
+        product_ranking = product_ranking[product_ranking["valor_ajustes"].gt(0)]
+
+    order_columns = {
+        "Maior valor no Estoque CD": "valor_quebra",
+        "Maior valor em Ajustes Lojas": "valor_ajustes",
+        "Maior quantidade em estoque": "quantidade_estoque",
+    }
+    order_column = order_columns[store_order]
+    product_ranking = (
+        product_ranking.sort_values([order_column, "valor_ajustes"], ascending=False)
+        .head(top_n)
+        .reset_index(drop=True)
+    )
+
+    total_adjustments = adjustments["valor_movimento_assinado"].sum()
+    adjusted_products = totals["codigo_produto"].nunique()
+    adjusted_stores = adjustments["subcategoria"].nunique()
+    summary_columns = st.columns(3)
+    with summary_columns[0]:
+        metric_card("Total Ajustes Lojas", brl(total_adjustments), "somente produtos do Estoque CD")
+    with summary_columns[1]:
+        metric_card("Produtos com ajustes", integer_br(adjusted_products), "produtos vinculados")
+    with summary_columns[2]:
+        metric_card("Lojas identificadas", integer_br(adjusted_stores), "lojas com movimentação")
+
+    st.markdown("#### Produtos e ajustes por loja")
+    st.caption("Clique na seta de um produto para abrir o ranking das lojas e os valores ajustados.")
+
+    if product_ranking.empty:
+        st.info("Nenhum produto corresponde aos filtros atuais.")
+        return
+
+    for position, product in product_ranking.iterrows():
+        label = (
+            f'**{position + 1}. {product["produto"]}**  ·  Código {product["codigo_produto"]}'
+            f'  ·  Estoque CD: **{brl(product["valor_quebra"])}**'
+            f'  ·  Ajustes Lojas: **{brl(product["valor_ajustes"])}**'
+        )
+        with st.expander(label):
+            product_stores = adjustments[
+                adjustments["codigo_produto"].eq(product["codigo_produto"])
+            ]
+            if product_stores.empty:
+                st.info("Este produto não possui ajustes por loja.")
+                continue
+
+            store_table = (
+                product_stores.groupby("subcategoria", as_index=False)
+                .agg(
+                    quantidade_ajustada=("quantidade_movimento_assinada", lambda values: values.sum(min_count=1)),
+                    valor_ajustes=("valor_movimento_assinado", "sum"),
+                    registros=("codigo_produto", "size"),
+                )
+                .sort_values("valor_ajustes", ascending=False)
+                .reset_index(drop=True)
+            )
+            store_table.insert(0, "ranking", range(1, len(store_table) + 1))
+            store_table["participacao"] = store_table["valor_ajustes"].div(
+                store_table["valor_ajustes"].sum()
+            )
+            store_table = store_table.rename(
+                columns={
+                    "ranking": "#",
+                    "subcategoria": "Loja",
+                    "quantidade_ajustada": "Quantidade ajustada",
+                    "valor_ajustes": "Valor Ajustes Lojas",
+                    "participacao": "% dos ajustes",
+                    "registros": "Registros",
+                }
+            )
+            st.dataframe(
+                store_table,
+                hide_index=True,
+                width="stretch",
+                height=min(430, 39 + 35 * max(len(store_table), 1)),
+                column_config={
+                    "#": st.column_config.NumberColumn(width="small", format="%d"),
+                    "Loja": st.column_config.TextColumn(width="large"),
+                    "Quantidade ajustada": st.column_config.NumberColumn(format="%,.0f"),
+                    "Valor Ajustes Lojas": st.column_config.NumberColumn(format="R$ %,.2f"),
+                    "% dos ajustes": st.column_config.NumberColumn(format="percent"),
+                    "Registros": st.column_config.NumberColumn(format="%d"),
+                },
+            )
 
 
 def render_product_detail(selected: pd.Series, product_movements: pd.DataFrame) -> None:
@@ -414,8 +560,9 @@ def main() -> None:
     ranking_all = build_ranking(stock, movements)
 
     total_break = ranking_all["valor_quebra"].sum()
-    total_identified = ranking_all["valor_identificado"].sum()
-    total_gap = ranking_all["saldo_justificar"].sum()
+    adjustments_kpi = movements_all[movements_all["categoria"].eq("Ajustes Lojas")]
+    total_identified = adjustments_kpi["valor_movimento_assinado"].sum()
+    total_gap = max(total_break - total_identified, 0)
     coverage = total_identified / total_break if total_break else 0
 
     st.markdown('<div class="eyebrow">Controle de estoque • CD 989</div>', unsafe_allow_html=True)
@@ -429,15 +576,17 @@ def main() -> None:
     with kpi_columns[0]:
         metric_card("Valor de quebra total CD", brl(total_break), f"{len(ranking_all)} produtos na Base")
     with kpi_columns[1]:
-        metric_card("Quebra total identificada", brl(total_identified), "soma integral de todas as movimentações")
+        metric_card("Total em Ajustes Lojas", brl(total_identified), "valor líquido encontrado nos ajustes")
     with kpi_columns[2]:
-        metric_card("Saldo a Identificar", brl(total_gap), "quebra sem identificação")
+        metric_card("Saldo após Ajustes", brl(total_gap), "quebra CD menos Ajustes Lojas")
     with kpi_columns[3]:
-        metric_card("Cobertura identificada", percentage(coverage), "identificado ÷ quebra CD")
+        metric_card("Cobertura Ajustes Lojas", percentage(coverage), "Ajustes Lojas ÷ quebra CD")
     with kpi_columns[4]:
         metric_card("Quantidade em estoque", integer_br(ranking_all["quantidade_estoque"].sum()), "unidades na base de referência")
 
-    overview_tab, ranking_tab, quality_tab = st.tabs(["Visão geral", "Ranking e justificativas", "Qualidade dos dados"])
+    stores_tab, overview_tab, ranking_tab, quality_tab = st.tabs(
+        ["Ajustes Lojas", "Visão geral", "Ranking e justificativas", "Qualidade dos dados"]
+    )
 
     filtered = ranking_all.copy()
     if search.strip():
@@ -581,6 +730,9 @@ def main() -> None:
             '<p class="method-note"><strong>Regra de conciliação:</strong> a quebra identificada é a soma absoluta integral dos valores encontrados em Ajustes Lojas, Transferências, Devoluções e Inventário.</p>',
             unsafe_allow_html=True,
         )
+
+    with stores_tab:
+        render_store_ranking(stock, movements_all, search, top_n)
 
     with quality_tab:
         st.markdown("#### Cobertura das abas")
