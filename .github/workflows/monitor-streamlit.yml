@@ -1,0 +1,30 @@
+name: Monitorar disponibilidade do Streamlit
+
+on:
+  schedule:
+    # A cada 6 horas (UTC).
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verificar-streamlit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Verificar resposta HTTP do dashboard
+        env:
+          STREAMLIT_APP_URL: ${{ secrets.STREAMLIT_APP_URL }}
+        run: |
+          if [ -z "$STREAMLIT_APP_URL" ]; then
+            echo 'ERRO: configure o secret STREAMLIT_APP_URL com o endereço https://...streamlit.app/'
+            exit 1
+          fi
+          echo 'Verificando a disponibilidade do dashboard...'
+          curl --fail --location --silent --show-error \
+            --connect-timeout 15 --max-time 90 \
+            --retry 2 --retry-delay 5 \
+            --output /dev/null "$STREAMLIT_APP_URL"
+          echo 'Servidor HTTP respondeu com sucesso. Isso não garante uma sessão Streamlit ativa nem impede necessariamente a hibernação.'
