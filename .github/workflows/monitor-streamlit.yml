@@ -1,10 +1,9 @@
-name: Monitorar disponibilidade do Streamlit
+﻿name: Monitorar disponibilidade do Streamlit
 
 on:
-  schedule:
-    # A cada 6 horas (UTC).
-    - cron: '17 */6 * * *'
   workflow_dispatch:
+  schedule:
+    - cron: '17 */6 * * *'
 
 permissions:
   contents: read
@@ -13,18 +12,36 @@ jobs:
   verificar-streamlit:
     runs-on: ubuntu-latest
     timeout-minutes: 3
+
     steps:
-      - name: Verificar resposta HTTP do dashboard
+      - name: Verificar endpoint de saude do Streamlit
         env:
           STREAMLIT_APP_URL: ${{ secrets.STREAMLIT_APP_URL }}
+        shell: bash
         run: |
-          if [ -z "$STREAMLIT_APP_URL" ]; then
-            echo 'ERRO: configure o secret STREAMLIT_APP_URL com o endereço https://...streamlit.app/'
+          set -euo pipefail
+
+          if [ -z "${STREAMLIT_APP_URL:-}" ]; then
+            echo "ERRO: configure o secret STREAMLIT_APP_URL."
             exit 1
           fi
-          echo 'Verificando a disponibilidade do dashboard...'
-          curl --fail --location --silent --show-error \
-            --connect-timeout 15 --max-time 90 \
-            --retry 2 --retry-delay 5 \
-            --output /dev/null "$STREAMLIT_APP_URL"
-          echo 'Servidor HTTP respondeu com sucesso. Isso não garante uma sessão Streamlit ativa nem impede necessariamente a hibernação.'
+
+          HEALTH_URL="${STREAMLIT_APP_URL%/}/_stcore/health"
+
+          echo "Verificando disponibilidade do Streamlit..."
+
+          STATUS=$(curl --silent --show-error \
+            --output /dev/null \
+            --write-out '%{http_code}' \
+            --connect-timeout 15 \
+            --max-time 25 \
+            "$HEALTH_URL")
+
+          echo "HTTP: $STATUS"
+
+          if [ "$STATUS" = "200" ]; then
+            echo "Streamlit respondeu com sucesso."
+          else
+            echo "Falha na verificacao de disponibilidade."
+            exit 1
+          fi
