@@ -460,16 +460,35 @@ def render_cd_ranking(stock_by_cd: pd.DataFrame, movements: pd.DataFrame,
     else:
         first_card = (f"Total {cd_label} no CD", brl(ranking["valor_estoque"].sum()), "CDs selecionados")
 
-    summary = st.columns(4)
-    for column, (title, value, detail) in zip(summary, [
+    cards = [
         first_card,
         (f"{store_label} nas lojas (referência)", brl(ranking["valor_identificado"].sum()),
          "Por PLU × CD; não exclusivo se vários CDs"),
         ("Valor Encontrado", brl(ranking["valor_conciliado"].sum()),
-         "Localizado na sobra da loja"),
+         "Localizado na sobra da loja" if breaking else "Localizado na quebra da loja"),
         ("Saldo não localizado", brl(ranking["saldo_justificar"].sum()),
          "Valor CD menos o comparado"),
-    ]):
+    ]
+    if breaking:
+        # KPI 5 exclusivo da primeira aba: Ranking Quebra CD × Sobra Loja.
+        # Numerador: valor localizado nas sobras das lojas, limitado por PLU.
+        # Denominador: quebra bruta dos CDs e produtos selecionados.
+        total_quebra_bruta = float(ranking["valor_estoque"].sum())
+        total_localizado = float(ranking["valor_conciliado"].sum())
+        cobertura_lojas = (
+            total_localizado / total_quebra_bruta if total_quebra_bruta else 0.0
+        )
+        cards.append((
+            "Cobertura",
+            percentage(cobertura_lojas),
+            "Conciliado / Estoque CD",
+        ))
+        st.caption("Indicadores do Ranking Quebra CD × Sobra Loja • 5 KPIs • versão 2")
+        card_columns = st.columns(5)
+    else:
+        card_columns = st.columns(4)
+
+    for column, (title, value, detail) in zip(card_columns, cards):
         with column:
             metric_card(title, value, detail)
 
