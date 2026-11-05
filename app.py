@@ -469,7 +469,7 @@ def render_cd_ranking(stock_by_cd: pd.DataFrame, movements: pd.DataFrame,
     full_export = ranking.rename(columns=display_cols)
     st.caption("")
     st.download_button(
-        f"Baixar ranking completo — {cd_label} CD × {store_label} Lojas (CSV)",
+        f"Baixar ranking completo - {cd_label} CD × {store_label} Lojas (CSV)",
         data=full_export.to_csv(index=False, sep=";", decimal=",", encoding="utf-8-sig").encode("utf-8-sig"),
         file_name=f"ranking_por_cd_{key_side}_cd.csv", mime="text/csv",
         width="stretch", key=f"download_cd_{key_side}",
