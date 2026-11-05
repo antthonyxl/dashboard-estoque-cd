@@ -470,20 +470,17 @@ def render_cd_ranking(stock_by_cd: pd.DataFrame, movements: pd.DataFrame,
          "Valor CD menos o comparado"),
     ]
     if breaking:
-        # KPI 5 exclusivo da primeira aba: Ranking Quebra CD × Sobra Loja.
-        # Numerador: valor localizado nas sobras das lojas, limitado por PLU.
-        # Denominador: quebra bruta dos CDs e produtos selecionados.
-        total_quebra_bruta = float(ranking["valor_estoque"].sum())
+        # KPI 5 exclusivo da aba Ranking Quebra CD × Sobra Loja.
+        # Cobertura sobre a mesma quebra LÍQUIDA exibida no primeiro KPI,
+        # sem alterar a apuração por PLU nem os demais indicadores.
         total_localizado = float(ranking["valor_conciliado"].sum())
-        cobertura_lojas = (
-            total_localizado / total_quebra_bruta if total_quebra_bruta else 0.0
-        )
+        cobertura_liquida = total_localizado / net_break if net_break > 0 else None
         cards.append((
             "Cobertura",
-            percentage(cobertura_lojas),
-            "Conciliado / Estoque CD",
+            percentage(cobertura_liquida) if cobertura_liquida is not None else "—",
+            "Valor encontrado / Quebra líquida CD" if cobertura_liquida is not None
+            else "Sem quebra líquida positiva para calcular",
         ))
-        st.caption("Indicadores do Ranking Quebra CD × Sobra Loja • 5 KPIs • versão 2")
         card_columns = st.columns(5)
     else:
         card_columns = st.columns(4)
