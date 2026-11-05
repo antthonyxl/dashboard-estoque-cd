@@ -436,9 +436,9 @@ def render_cd_ranking(stock_by_cd: pd.DataFrame, movements: pd.DataFrame,
         (f"Total {cd_label} no CD", brl(ranking["valor_estoque"].sum()), "CDs selecionados"),
         (f"{store_label} nas lojas (referência)", brl(ranking["valor_identificado"].sum()),
          "Por PLU × CD; não exclusivo se vários CDs"),
-        ("Valor comparado por CD", brl(ranking["valor_conciliado"].sum()),
-         "Mínimo por PLU e CD; não é rateio"),
-        ("Saldo não coberto no CD", brl(ranking["saldo_justificar"].sum()),
+        ("Valor Encontrado", brl(ranking["valor_conciliado"].sum()),
+         "Localizado na sobra da loja"),
+        ("Saldo não localizado", brl(ranking["saldo_justificar"].sum()),
          "Valor CD menos o comparado"),
     ]):
         with column:
