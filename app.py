@@ -399,7 +399,7 @@ def render_cd_ranking(stock_by_cd: pd.DataFrame, movements: pd.DataFrame,
         )
     with controls[2]:
         matched_only = st.toggle(
-            "Somente com ajuste na loja", value=False, key=f"cd_match_{key_side}",
+            "Somente com PLU´s que tenham ajuste na loja", value=False, key=f"cd_match_{key_side}",
         )
 
     if not selected_cds:
@@ -467,6 +467,7 @@ def render_cd_ranking(stock_by_cd: pd.DataFrame, movements: pd.DataFrame,
     st.write()
     # Exporta TODOS os registros filtrados, mesmo que as tabelas mostrem Top N.
     full_export = ranking.rename(columns=display_cols)
+    st.caption("")
     st.download_button(
         f"Baixar ranking completo — {cd_label} CD × {store_label} Lojas (CSV)",
         data=full_export.to_csv(index=False, sep=";", decimal=",", encoding="utf-8-sig").encode("utf-8-sig"),
@@ -1021,15 +1022,14 @@ def main() -> None:
         st.stop()
 
     st.markdown('<div class="eyebrow">Controle de estoque • Quebras e sobras</div>', unsafe_allow_html=True)
-    st.title("Análise de Quebras e Sobras — Estoque CD")
+    st.title("Análise de Quebras e Sobras - Estoque CD")
     st.markdown(
-        '<div class="hero-subtitle">Conciliação cruzada por PLU: quebra CD × sobra loja; sobra CD × quebra loja.</div>',
+        '<div class="hero-subtitle">Conciliação cruzada por PLU</div>',
         unsafe_allow_html=True,
     )
-    st.caption("O sentido é determinado pela QUANTIDADE, não pelo valor líquido. Os valores financeiros são exibidos em magnitude absoluta após a classificação.")
     cd_break_tab, cd_surplus_tab, break_tab, surplus_tab, quality_tab = st.tabs([
         "Ranking Quebra CD × Sobra Loja", "Ranking Sobra CD × Quebra Loja",
-        "Quebras (CD negativo)", "Sobras (CD positivo)",
+        "Quebras CD (Detalhe Lojas)", "Sobras CD (Detalhe Lojas)",
         "Qualidade dos dados",
     ])
     with cd_break_tab:
