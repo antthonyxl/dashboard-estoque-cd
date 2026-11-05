@@ -431,9 +431,38 @@ def render_cd_ranking(stock_by_cd: pd.DataFrame, movements: pd.DataFrame,
             "de loja para o CD selecionado."
         )
 
+    # Apenas no ranking de QUEBRAS: quebra líquida = quebra bruta - sobra do próprio CD.
+    # As sobras são obtidas da aba Estoque CD, não dos ajustes das lojas.
+    # Aplicamos os mesmos CDs e a mesma busca de produto ao cálculo.
+    if breaking:
+        cd_surpluses = stock_by_cd.loc[
+            stock_by_cd["tipo_estoque"].eq("Sobra")
+            & stock_by_cd["codigo_cd"].isin(selected_cds)
+        ].copy()
+        if search.strip():
+            cd_surpluses = cd_surpluses.loc[
+                cd_surpluses["produto"].map(normalize_label).str.contains(re.escape(token), regex=True)
+                | cd_surpluses["codigo_produto"].map(normalize_label).str.contains(re.escape(token), regex=True)
+            ]
+        if matched_only:
+            cd_surpluses = cd_surpluses.loc[
+                cd_surpluses["codigo_produto"].isin(ranking["codigo_produto"])
+            ]
+        gross_break = float(ranking["valor_estoque"].sum())
+        total_cd_surplus = float(cd_surpluses["valor_estoque"].sum())
+        net_break = gross_break - total_cd_surplus
+        covered_pct = total_cd_surplus / gross_break if gross_break else 0.0
+        first_card = (
+            "Quebra líquida no CD",
+            brl(net_break),
+            f"Sobra do CD: {brl(total_cd_surplus)} | Cobertura da quebra: {percentage(covered_pct)}",
+        )
+    else:
+        first_card = (f"Total {cd_label} no CD", brl(ranking["valor_estoque"].sum()), "CDs selecionados")
+
     summary = st.columns(4)
     for column, (title, value, detail) in zip(summary, [
-        (f"Total {cd_label} no CD", brl(ranking["valor_estoque"].sum()), "CDs selecionados"),
+        first_card,
         (f"{store_label} nas lojas (referência)", brl(ranking["valor_identificado"].sum()),
          "Por PLU × CD; não exclusivo se vários CDs"),
         ("Valor Encontrado", brl(ranking["valor_conciliado"].sum()),
